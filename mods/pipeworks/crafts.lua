@@ -176,6 +176,22 @@ minetest.register_craft( {
 	},
 })
 
+minetest.register_craft( {
+	output = "pipeworks:batch_filter",
+	recipe = {
+		{ "bucket:bucket_empty" },
+		{ "pipeworks:filter" }
+	},
+})
+
+minetest.register_craft( {
+	output = "pipeworks:mese_batch_filter",
+	recipe = {
+		{ "bucket:bucket_empty" },
+		{ "pipeworks:mese_filter" }
+	},
+})
+
 if minetest.get_modpath("digilines") then
 	minetest.register_craft( {
 		output = "pipeworks:digiline_filter 2",

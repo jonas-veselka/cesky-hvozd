@@ -60,7 +60,9 @@ Exact match - off=Filtrace vypnuta
 Exact match - on=Filtrace zapnuta
 Prefer item types:=Filtrovat:
 Itemwise=po kusech
+Batchwise=po nastavitelných dávkách
 Stackwise=po dávkách
+Multibatchwise=po nastavitelných násobcích
 Digiline=digilinka
 
 ## legacy

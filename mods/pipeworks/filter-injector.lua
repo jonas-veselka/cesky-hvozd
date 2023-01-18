@@ -30,11 +30,24 @@ local function set_filter_formspec(data, meta)
 			"button_exit[6.3,1.3;2,1;close;"..S("Close").."]"
 	else
 		local exmatch_button = ""
+		local sendrest_button = ""
+		local batchsize_field = ""
+		local batchsize_button = ""
+		local batchsize = meta:get_int("batchsize")
 		if data.stackwise then
 			exmatch_button =
-				fs_helpers.cycling_button(meta, "button["..(10.2-(0.22)-4)..",4.5;4,1", "exmatch_mode",
+				fs_helpers.cycling_button(meta, "button["..(10.2-(0.22)-2.5)..",4.5;2.5,1", "exmatch_mode",
 					{S("Exact match - off"),
 					 S("Exact match - on")})
+		end
+		if data.batches then
+			sendrest_button =
+				fs_helpers.cycling_button(meta, "button["..(10.2-(0.22)-5.3)..",4.5;2.5,1", "sendrest_mode",
+					{S("Only complete\nbatches"),
+					 S("Send incomplete\nbatches")})
+			batchsize_field = "field["..(10.2-(0.22)-7)..",4.5;1,1;batchsize;"..S("Batch size:")..";"..batchsize.."]"
+			-- TODO predelat na label, plus a minus
+			batchsize_button = "button["..(10.2-(0.22)-6)..",4.5;0.5,1;confirm_batchsize;"..S("✓").."]"
 		end
 		local size = "10.2,11"
 		local list_backgrounds = ""
@@ -55,10 +68,13 @@ local function set_filter_formspec(data, meta)
 			"label[0.22,1.5;"..S("Prefer item types:").."]"..
 			list_backgrounds..
 			"list[context;main;0.22,1.75;8,2;]"..
-			fs_helpers.cycling_button(meta, "button[0.22,4.5;4,1", "slotseq_mode",
+			fs_helpers.cycling_button(meta, "button[0.22,4.5;2.5,1", "slotseq_mode",
 				{S("Sequence slots by Priority"),
 				 S("Sequence slots Randomly"),
 				 S("Sequence slots by Rotation")})..
+			batchsize_field..
+			batchsize_button..
+			sendrest_button..
 			exmatch_button..
 			pipeworks.fs_helpers.get_inv(6)..
 			"listring[]"
@@ -126,6 +142,8 @@ local function punch_filter(data, filtpos, filtnode, msg)
 
 	local slotseq_mode
 	local exmatch_mode
+	local sendrest_mode
+	local batchsize
 
 	local filters = {}
 	if data.digiline then
@@ -228,6 +246,14 @@ local function punch_filter(data, filtpos, filtnode, msg)
 		exmatch_mode = filtmeta:get_int("exmatch_mode")
 	end
 
+	if sendrest_mode == nil then
+		sendrest_mode = filtmeta:get_int("sendrest_mode")
+	end
+
+	if batchsize == nil then
+		batchsize = filtmeta:get_int("batchsize")
+	end
+
 	local frominv
 	if fromtube.return_input_invref then
 		frominv = fromtube.return_input_invref(frompos, fromnode, dir, owner)
@@ -315,10 +341,25 @@ local function punch_filter(data, filtpos, filtnode, msg)
 					filtmeta:set_int("slotseq_index", nextpos)
 					set_filter_infotext(data, filtmeta)
 				end
+
+
+
 				local item
 				local count
 				if data.stackwise then
 					count = math.min(stack:get_count(), doRemove)
+
+					-- TODO asi bude potreba prochazet vice stacku,
+					-- napr. kdyby nasel jen dva po 7 kusech, aby z nich udelal davku 10
+					-- ale nevim, jestli to vubec pujde
+					if data.batches then
+						count = math.min(batchsize, count)
+						if sendrest_mode == 0 and count < batchsize then
+							return false -- stack is fewer then the batch size
+						end
+					end
+					-- TODO jeste variantu pro data.multibatches
+
 					if filterfor.count and (filterfor.count > 1 or data.digiline) then
 						if exmatch_mode ~= 0 and filterfor.count > count then
 							return false -- not enough, fail
@@ -330,6 +371,10 @@ local function punch_filter(data, filtpos, filtnode, msg)
 				else
 					count = 1
 				end
+
+
+
+
 				if fromtube.remove_items then
 					-- it could be the entire stack...
 					item = fromtube.remove_items(frompos, fromnode, stack, dir, count, frominvname, spos)
@@ -368,11 +413,27 @@ for _, data in ipairs({
 		name = "filter",
 		wise_desc = S("Itemwise"),
 		stackwise = false,
+		batches = false,
 	},
 	{
 		name = "mese_filter",
 		wise_desc = S("Stackwise"),
 		stackwise = true,
+		batches = false,
+	},
+	{
+		name = "batch_filter",
+		wise_desc = S("Batchwise"),
+		stackwise = true,
+		batches = true,
+		multibatches = false,
+	},
+	{
+		name = "mese_batch_filter",
+		wise_desc = S("Multibatchwise"),
+		stackwise = true,
+		batches = true,
+		multibatches = true,
 	},
 	{ -- register even if no digilines
 		name = "digiline_filter",
@@ -397,6 +458,7 @@ for _, data in ipairs({
 		sounds = default.node_sound_wood_defaults(),
 		on_construct = function(pos)
 			local meta = minetest.get_meta(pos)
+			meta:set_int("batchsize", 1)
 			set_filter_formspec(data, meta)
 			set_filter_infotext(data, meta)
 			local inv = meta:get_inventory()
@@ -474,10 +536,19 @@ for _, data in ipairs({
 		}
 	else
 		node.on_receive_fields = function(pos, formname, fields, sender)
+			minetest.chat_send_all("FIELDS: "..tostring(fields.batchsize))
 			if not pipeworks.may_configure(pos, sender) then return end
 			fs_helpers.on_receive_fields(pos, fields)
 			local meta = minetest.get_meta(pos)
 			meta:set_int("slotseq_index", 1)
+
+			if fields.batchsize and string.find(fields.batchsize, "^[0-9]+$") then
+				local batchsize = tonumber(fields.batchsize)
+				if batchsize >= 1 and batchsize ~= meta:get_int("batchsize") then
+					meta:set_int("batchsize", batchsize)
+				end
+			end
+
 			set_filter_formspec(data, meta)
 			set_filter_infotext(data, meta)
 		end
